@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Flappy Bird</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f0f0f0;
+        }
+        canvas {
+            border: 1px solid #000;
+            background-color: #70c5ce;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="320" height="480"></canvas>
+
+    <script>
+        // 获取 Canvas 元素和上下文
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // 游戏变量
+        let frames = 0;
+        let score = 0;
+        const gravity = 0.08;
+        const jump = 3.6;
+        let gameOver = false;
+
+        // 使用Web Audio API创建音效
+        const sounds = {
+            audioContext: null,
+            
+            init: function() {
+                try {
+                    // 创建音频上下文
+                    window.AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.audioContext = new AudioContext();
+                } catch(e) {
+                    console.warn("Web Audio API不受支持。游戏将没有声音。", e);
+                }
+            },
+            
+            play: function(type) {
+                if (!this.audioContext) return;
+                
+                const oscillator = this.audioContext.createOscillator();
+                const gainNode = this.audioContext.createGain();
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(this.audioContext.destination);
+                
+                // 根据不同类型播放不同音效
+                switch(type) {
+                    case "jump":
+                        oscillator.type = "sine";
+                        oscillator.frequency.setValueAtTime(880, this.audioContext.currentTime);
+                        oscillator.frequency.exponentialRampToValueAtTime(
+                            440, this.audioContext.currentTime + 0.1
+                        );
+                        gainNode.gain.setValueAtTime(0.3, this.audioContext.currentTime);
+                        gainNode.gain.exponentialRampToValueAtTime(
+                            0.01, this.audioContext.currentTime + 0.1
+                        );
+                        oscillator.start();
+                        oscillator.stop(this.audioContext.currentTime + 0.1);
+                        break;
+                        
+                    case "score":
+                        oscillator.type = "sine";
+                        oscillator.frequency.setValueAtTime(880, this.audioContext.currentTime);
+                        oscillator.frequency.exponentialRampToValueAtTime(
+                            1760, this.audioContext.currentTime + 0.1
+                        );
+                        gainNode.gain.setValueAtTime(0.3, this.audioContext.currentTime);
+                        gainNode.gain.exponentialRampToValueAtTime(
+                            0.01, this.audioContext.currentTime + 0.1
+                        );
+                        oscillator.start();
+                        oscillator.stop(this.audioContext.currentTime + 0.1);
+                        break;
+                        
+                    case "hit":
+                        oscillator.type = "sawtooth";
+                        oscillator.frequency.setValueAtTime(160, this.audioContext.currentTime);
+                        oscillator.frequency.exponentialRampToValueAtTime(
+                            40, this.audioContext.currentTime + 0.2
+                        );
+                        gainNode.gain.setValueAtTime(0.3, this.audioContext.currentTime);
+                        gainNode.gain.exponentialRampToValueAtTime(
+                            0.01, this.audioContext.currentTime + 0.2
+                        );
+                        oscillator.start();
+                        oscillator.stop(this.audioContext.currentTime + 0.2);
+                        break;
+                }
+            }
+        };
+
+        // 加载图像
+        const sprite = new Image();
+        sprite.src = 'data:image/png;base64,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';
+
+        // 载入时初始化声音
+        window.onload = function() {
+            sounds.init();
+            
+            // 为了移动设备上的音频播放
+            document.addEventListener('touchstart', function() {
+                // 创建静音音频并播放以解锁音频
+                const silentSound = new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=");
+                silentSound.play().catch(e => {});
+            }, {once: true});
+        };
+
+        // 鸟对象
+        const bird = {
+            x: 50,
+            y: 150,
+            width: 34,
+            height: 24,
+            radius: 12,
+            frame: 0,
+            
+            gravity: 0,
+            jump: 4.6,
+            speed: 0,
+            
+            update: function() {
+                // 鸟的飞行速度
+                this.speed += this.gravity;
+                this.y += this.speed;
+                
+                // 地面碰撞检测
+                if(this.y + this.height/2 >= canvas.height - foreground.height) {
+                    this.y = canvas.height - foreground.height - this.height/2;
+                    if (!gameOver) {
+                        sounds.play("hit");
+                    }
+                    gameOver = true;
+                }
+                
+                // 顶部碰撞检测
+                if(this.y <= 0) {
+                    this.y = 0;
+                    this.speed = 0;
+                }
+                
+                // 鸟的翅膀动画
+                if(frames % 10 === 0) {
+                    this.frame = (this.frame + 1) % 4;
+                }
+            },
+            
+            flap: function() {
+                this.speed = -this.jump;
+                sounds.play("jump");
+            },
+            
+            render: function() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                
+                // 根据速度调整鸟的角度
+                let angle = Math.PI/6;
+                if(this.speed >= 0) {
+                    angle = Math.PI/6 * (this.speed/10);
+                    if(angle > Math.PI/2) angle = Math.PI/2;
+                } else {
+                    angle = -Math.PI/6;
+                }
+                
+                ctx.rotate(angle);
+                
+                // 绘制鸟
+                ctx.fillStyle = "#FF0000";
+                ctx.beginPath();
+                ctx.arc(0, 0, this.radius, 0, Math.PI * 2, false);
+                ctx.fill();
+                
+                // 绘制眼睛
+                ctx.fillStyle = "#FFFFFF";
+                ctx.beginPath();
+                ctx.arc(5, -5, 5, 0, Math.PI * 2, false);
+                ctx.fill();
+                
+                ctx.fillStyle = "#000000";
+                ctx.beginPath();
+                ctx.arc(7, -5, 2, 0, Math.PI * 2, false);
+                ctx.fill();
+                
+                // 绘制嘴巴
+                ctx.fillStyle = "#FF8800";
+                ctx.beginPath();
+                ctx.moveTo(12, 0);
+                ctx.lineTo(20, 0);
+                ctx.lineTo(12, 3);
+                ctx.fill();
+                
+                // 绘制翅膀
+                ctx.fillStyle = "#FF6666";
+                ctx.beginPath();
+                ctx.moveTo(-5, 0);
+                ctx.lineTo(-15, this.frame * 2 - 3);
+                ctx.lineTo(-15, this.frame * 2 + 3);
+                ctx.fill();
+                
+                ctx.restore();
+            }
+        };
+
+        // 前景对象
+        const foreground = {
+            x: 0,
+            y: canvas.height - 80,
+            width: canvas.width,
+            height: 80,
+            
+            update: function() {
+                this.x = (this.x - 2) % (this.width/2);
+            },
+            
+            render: function() {
+                ctx.fillStyle = "#DED895";
+                ctx.fillRect(0, this.y, this.width, this.height);
+                
+                ctx.fillStyle = "#73BF2E";
+                ctx.fillRect(0, this.y, this.width, 20);
+            }
+        };
+
+        // 管道对象
+        const pipes = {
+            position: [],
+            top: {
+                width: 53,
+                height: 400
+            },
+            bottom: {
+                width: 53,
+                height: 400
+            },
+            gap: 180,
+            maxYPos: -150,
+            
+            update: function() {
+                // 每 150 帧生成一对新的管道
+                if(frames % 150 === 0) {
+                    this.position.push({
+                        x: canvas.width,
+                        y: this.maxYPos * (Math.random() + 1)
+                    });
+                }
+                
+                // 更新所有管道的位置
+                for(let i = 0; i < this.position.length; i++) {
+                    // 移动管道
+                    this.position[i].x -= 1.5;
+                    
+                    // 检测小鸟是否通过管道
+                    if(this.position[i].x + this.top.width <= bird.x && !this.position[i].passed) {
+                        this.position[i].passed = true;
+                        score++;
+                        sounds.play("score");
+                    }
+                    
+                    // 碰撞检测
+                    // 上管道
+                    if(bird.x + bird.radius > this.position[i].x && 
+                       bird.x - bird.radius < this.position[i].x + this.top.width && 
+                       bird.y - bird.radius < this.position[i].y + this.top.height && 
+                       bird.y + bird.radius > this.position[i].y) {
+                        gameOver = true;
+                        sounds.play("hit");
+                    }
+                    
+                    // 下管道 - 修正的碰撞检测逻辑
+                    if(bird.x + bird.radius > this.position[i].x && 
+                       bird.x - bird.radius < this.position[i].x + this.bottom.width && 
+                       bird.y + bird.radius > this.position[i].y + this.gap + this.top.height && 
+                       bird.y - bird.radius < this.position[i].y + this.gap + this.top.height + this.bottom.height) {
+                        gameOver = true;
+                        sounds.play("hit");
+                    }
+                    
+                    // 移除超出屏幕的管道
+                    if(this.position[i].x + this.top.width < 0) {
+                        this.position.shift();
+                    }
+                }
+            },
+            
+            render: function() {
+                for(let i = 0; i < this.position.length; i++) {
+                    // 绘制上管道
+                    ctx.fillStyle = "#73BF2E";
+                    ctx.fillRect(this.position[i].x, this.position[i].y, this.top.width, this.top.height);
+                    
+                    // 绘制管道口
+                    ctx.fillStyle = "#74B31B";
+                    ctx.fillRect(this.position[i].x - 2, this.position[i].y + this.top.height - 20, this.top.width + 4, 20);
+                    
+                    // 绘制下管道
+                    ctx.fillStyle = "#73BF2E";
+                    ctx.fillRect(this.position[i].x, this.position[i].y + this.gap + this.top.height, this.bottom.width, this.bottom.height);
+                    
+                    // 绘制管道口
+                    ctx.fillStyle = "#74B31B";
+                    ctx.fillRect(this.position[i].x - 2, this.position[i].y + this.gap + this.top.height, this.bottom.width + 4, 20);
+                }
+            }
+        };
+
+        // 绘制背景
+        function drawBackground() {
+            ctx.fillStyle = "#70C5CE";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // 绘制云朵
+            ctx.fillStyle = "#FFFFFF";
+            ctx.beginPath();
+            ctx.arc(100, 80, 30, 0, Math.PI * 2, false);
+            ctx.arc(130, 70, 30, 0, Math.PI * 2, false);
+            ctx.arc(160, 80, 30, 0, Math.PI * 2, false);
+            ctx.fill();
+            
+            ctx.beginPath();
+            ctx.arc(250, 100, 25, 0, Math.PI * 2, false);
+            ctx.arc(275, 90, 25, 0, Math.PI * 2, false);
+            ctx.arc(300, 100, 25, 0, Math.PI * 2, false);
+            ctx.fill();
+        }
+
+        // 绘制分数
+        function drawScore() {
+            ctx.fillStyle = "#FFFFFF";
+            ctx.strokeStyle = "#000000";
+            ctx.lineWidth = 2;
+            ctx.font = "35px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText(score, canvas.width/2, 50);
+            ctx.strokeText(score, canvas.width/2, 50);
+        }
+
+        // 绘制游戏结束界面
+        function drawGameOver() {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = "#FFFFFF";
+            ctx.font = "30px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText("游戏结束", canvas.width/2, canvas.height/2 - 50);
+            
+            ctx.font = "20px Arial";
+            ctx.fillText("得分: " + score, canvas.width/2, canvas.height/2);
+            
+            ctx.font = "15px Arial";
+            ctx.fillText("点击屏幕或按空格键重新开始", canvas.width/2, canvas.height/2 + 40);
+        }
+
+        // 重置游戏
+        function resetGame() {
+            bird.y = 150;
+            bird.speed = 0;
+            pipes.position = [];
+            score = 0;
+            gameOver = false;
+        }
+
+        // 游戏循环
+        function update() {
+            frames++;
+            
+            if(!gameOver) {
+                bird.gravity = gravity;
+                bird.update();
+                foreground.update();
+                pipes.update();
+            }
+            
+            // 绘制游戏
+            drawBackground();
+            pipes.render();
+            foreground.render();
+            bird.render();
+            drawScore();
+            
+            if(gameOver) {
+                drawGameOver();
+            }
+            
+            requestAnimationFrame(update);
+        }
+
+        // 事件监听
+        document.addEventListener("keydown", function(evt) {
+            if(evt.code === "Space") {
+                if(gameOver) {
+                    resetGame();
+                } else {
+                    bird.flap();
+                }
+            }
+        });
+
+        canvas.addEventListener("click", function() {
+            if(gameOver) {
+                resetGame();
+            } else {
+                bird.flap();
+            }
+        });
+
+        // 开始游戏
+        update();
+    </script>
+</body>
+</html> 
